@@ -27,7 +27,7 @@ pipeline {
             steps {
                 sh '''
                   echo "Testing if app is responding on port 9090..."
-                  sleep 5   # wait a few seconds for container to start
+                  sleep 5
                   curl -I http://localhost:9090 || exit 1
                   echo "✅ App is up and responding!"
                 '''
@@ -36,7 +36,13 @@ pipeline {
 
         stage('UI Automation Tests') {
             steps {
-                echo "🔖 Placeholder for UI automation tests (Cypress / Selenium / Playwright etc.)"
+                sh '''
+                  echo "Running Playwright UI tests..."
+                  npm ci || npm install
+                  npx playwright install --with-deps
+                  npx playwright test --reporter=line,junit --output=test-results
+                '''
+                junit 'test-results/*.xml'
             }
         }
     }
