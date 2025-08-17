@@ -11,16 +11,16 @@ pipeline {
         }
 
         stage('Run Container') {
-    steps {
-        sh '''
-          # Stop and remove if exists
-          docker stop travel-check-list || true
-          docker rm travel-check-list || true
+            steps {
+                sh '''
+                  # Stop and remove if exists
+                  docker stop travel-check-list || true
+                  docker rm travel-check-list || true
 
-          # Run new container
-          docker run -d --name travel-check-list -p 9090:80 impraveenraj/travel-check-list:latest
-        '''
-    }
-}
+                  # Run new container
+                  docker run -d --name travel-check-list -p 9090:80 impraveenraj/travel-check-list:latest
+                '''
+            }
+        }
     }
 }
