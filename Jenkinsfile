@@ -14,7 +14,7 @@ pipeline {
             steps {
                 sh '''
                   # Stop old container if running
-                  docker rm -f travel-check-list || true
+                  docker rm -f kind_clarke || true
 
                   # Run on port 9090
                   docker run -d --name travel-check-list -p 9090:80 impraveenraj/travel-check-list:latest
