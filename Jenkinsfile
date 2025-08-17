@@ -33,5 +33,11 @@ pipeline {
                 '''
             }
         }
+
+        stage('UI Automation Tests') {
+            steps {
+                echo "🔖 Placeholder for UI automation tests (Cypress / Selenium / Playwright etc.)"
+            }
+        }
     }
 }
