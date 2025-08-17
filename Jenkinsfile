@@ -22,5 +22,16 @@ pipeline {
                 '''
             }
         }
+
+        stage('Test Deployment') {
+            steps {
+                sh '''
+                  echo "Testing if app is responding on port 9090..."
+                  sleep 5   # wait a few seconds for container to start
+                  curl -I http://localhost:9090 || exit 1
+                  echo "✅ App is up and responding!"
+                '''
+            }
+        }
     }
 }
