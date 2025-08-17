@@ -40,14 +40,26 @@ pipeline {
                     args '-v /dev/shm:/dev/shm'
                 }
             }
+            environment {
+                // ✅ use workspace for npm cache to avoid permission errors
+                NPM_CONFIG_CACHE = "${WORKSPACE}/.npm"
+            }
             steps {
                 sh '''
                   echo "🧪 Running Playwright UI tests..."
+                  mkdir -p $NPM_CONFIG_CACHE
                   npm ci || npm install
                   npx playwright test --reporter=line,junit --output=test-results
                 '''
                 junit 'test-results/*.xml'
             }
+        }
+    }
+
+    post {
+        always {
+            echo "🧹 Cleaning workspace..."
+            cleanWs()
         }
     }
 }
