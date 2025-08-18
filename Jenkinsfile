@@ -49,17 +49,13 @@ pipeline {
     stage('UI Automation Tests') {
       agent {
         docker {
-          // ✅ valid Playwright image tag
           image 'mcr.microsoft.com/playwright:v1.54.0-noble'
-          // reach host app + larger /dev/shm
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
       }
       steps {
         sh '''
           echo "🧪 Running Playwright UI tests..."
-
-          # Safe npm cache path inside the container workspace
           export NPM_CONFIG_CACHE="$PWD/.npm"
           mkdir -p "$NPM_CONFIG_CACHE"
 
@@ -69,24 +65,30 @@ pipeline {
             npm install --no-audit --no-fund
           fi
 
-          # detect tests directory (test/ or tests/)
-          TEST_DIR="tests"; [ -d test ] && TEST_DIR="test"
-
+          # Playwright config writes:
+          # - JUnit -> test-results/results.xml
+          # - HTML  -> playwright-report/
           mkdir -p test-results
-
-          # Run with JUnit + HTML reporters; HTML goes to playwright-report/
-          APP_URL="$APP_URL" npx playwright test \
-            --reporter=junit,html \
-            --output=test-results
-
-          # Normalize JUnit file if Playwright placed it at root
-          [ -f results.xml ] && mv results.xml test-results/
+          APP_URL="$APP_URL" npx playwright test
         '''
       }
       post {
         always {
-          junit allowEmptyResults: true, testResults: 'test-results/**/*.xml'
-          archiveArtifacts artifacts: 'test-results/**, playwright-report/**', onlyIfSuccessful: false
+          // JUnit test view + trends
+          junit allowEmptyResults: true, testResults: 'test-results/results.xml'
+
+          // Keep raw artifacts too
+          archiveArtifacts artifacts: 'test-results/**,playwright-report/**', onlyIfSuccessful: false
+
+          // 🔗 Publish Playwright HTML report inside Jenkins UI
+          publishHTML([
+            reportDir: 'playwright-report',
+            reportFiles: 'index.html',
+            reportName: 'Playwright Report',
+            keepAll: true,
+            alwaysLinkToLastBuild: true,
+            allowMissing: true
+          ])
         }
       }
     }
