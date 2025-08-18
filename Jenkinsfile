@@ -50,7 +50,6 @@ pipeline {
       agent {
         docker {
           image 'mcr.microsoft.com/playwright:v1.54.0-noble'
-          // reach host app + bigger /dev/shm for Chromium
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
       }
@@ -60,6 +59,7 @@ pipeline {
           echo "Workspace (container PWD): $PWD"
 
           PW_HTML_DIR="$PWD/playwright-report"
+          PW_HTML_SAFE="$PWD/playwright-report-safe"
           PW_JUNIT_DIR="$PWD/test-results"
           PW_JUNIT_FILE="$PW_JUNIT_DIR/results.xml"
 
@@ -72,7 +72,7 @@ pipeline {
             npm install --no-audit --no-fund
           fi
 
-          # CI Playwright config (forces outputs to mounted workspace)
+          # CI Playwright config -> writes exactly where we want
           cat > jenkins.playwright.config.ts <<'EOF'
           import { defineConfig } from '@playwright/test';
           export default defineConfig({
@@ -94,44 +94,38 @@ pipeline {
           APP_URL="$APP_URL" PW_JUNIT_FILE="$PW_JUNIT_FILE" PW_HTML_DIR="$PW_HTML_DIR" \
             npx playwright test --config=jenkins.playwright.config.ts
 
-          # Prove where the HTML landed (debug)
-          echo "Searching for index.html..."
-          find "$PWD" -maxdepth 4 -path "*/playwright-report/index.html" -print || true
+          # Sanity: prove index.html exists
+          [ -f "$PW_HTML_DIR/index.html" ] || { echo "❌ Missing $PW_HTML_DIR/index.html"; exit 2; }
+          [ -f "$PW_JUNIT_FILE" ]          || { echo "❌ Missing $PW_JUNIT_FILE"; exit 3; }
 
-          # Ensure Jenkins can copy (ownership/permissions)
-          HOST_UID=$(stat -c '%u' . || id -u)
-          HOST_GID=$(stat -c '%g' . || id -g)
-          chown -R "${HOST_UID}:${HOST_GID}" "$PW_HTML_DIR" "$PW_JUNIT_DIR" || true
-          chmod -R a+rX "$PW_HTML_DIR" "$PW_JUNIT_DIR" || true
+          echo "🔎 Original report listing:"
+          ls -lah "$PW_HTML_DIR" | sed 's/^/  /'
 
-          # Guards (clear errors if missing)
-          [ -f "$PW_JUNIT_FILE" ] || { echo "❌ Missing $PW_JUNIT_FILE"; exit 3; }
-          [ -f "$PW_HTML_DIR/index.html" ] || { echo "❌ Missing $PW_HTML_DIR/index.html (HTML report not generated)"; exit 2; }
+          # ---- Make a clean, symlink‑free, readable copy for the publisher ----
+          rm -rf "$PW_HTML_SAFE"
+          mkdir -p "$PW_HTML_SAFE"
+          # -L follows symlinks, ensuring plain files get copied
+          cp -a -L "$PW_HTML_DIR"/. "$PW_HTML_SAFE"/
 
-          echo "✅ Reports ready:"
-          ls -lah "$PW_JUNIT_DIR"
-          ls -lah "$PW_HTML_DIR"
+          # Relax perms so Jenkins can traverse/copy
+          chmod -R a+rX "$PW_HTML_SAFE" "$PW_JUNIT_DIR" || true
+
+          echo "🔎 Safe report listing:"
+          ls -lah "$PW_HTML_SAFE" | sed 's/^/  /'
+          # --------------------------------------------------------------------
         '''
       }
       post {
         always {
-          // Pre-clean this build's publish target (avoids leftover perms)
-          sh '''
-            if [ -n "$JENKINS_HOME" ] && [ -n "$JOB_NAME" ] && [ -n "$BUILD_NUMBER" ]; then
-              TARGET_DIR="$JENKINS_HOME/jobs/$JOB_NAME/builds/$BUILD_NUMBER/htmlreports/Playwright_20Report"
-              rm -rf "$TARGET_DIR" || true
-            fi
-          '''
-
           // JUnit tab + trends
           junit allowEmptyResults: true, testResults: 'test-results/results.xml'
 
-          // Keep artifacts for download (HTML report, traces, screenshots)
-          archiveArtifacts artifacts: 'test-results/**,playwright-report/**', onlyIfSuccessful: false
+          // Keep both original + safe copies as artifacts
+          archiveArtifacts artifacts: 'test-results/**,playwright-report/**,playwright-report-safe/**', onlyIfSuccessful: false
 
-          // Publish Playwright HTML report inside Jenkins
+          // ✅ Publish the SAFE copy so HTML Publisher never chokes
           publishHTML([
-            reportDir: 'playwright-report',
+            reportDir: 'playwright-report-safe',
             reportFiles: 'index.html',
             reportName: 'Playwright Report',
             keepAll: true,
