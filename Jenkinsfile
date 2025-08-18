@@ -50,14 +50,18 @@ pipeline {
       agent {
         docker {
           image 'mcr.microsoft.com/playwright:v1.54.0-noble'
+          // reach host app + bigger /dev/shm for Chromium
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
       }
       steps {
         sh '''
+          set -e
           echo "🧪 Running Playwright UI tests..."
           echo "Workspace (container PWD): $PWD"
+          echo "Host workspace (Jenkins thinks): $WORKSPACE"
 
+          # Paths relative to the mounted workspace (handles @2 suffix)
           PW_HTML_DIR="$PWD/playwright-report"
           PW_HTML_SAFE="$PWD/playwright-report-safe"
           PW_JUNIT_DIR="$PWD/test-results"
@@ -72,7 +76,7 @@ pipeline {
             npm install --no-audit --no-fund
           fi
 
-          # CI Playwright config -> writes exactly where we want
+          # CI Playwright config -> writes EXACTLY where we want
           cat > jenkins.playwright.config.ts <<'EOF'
           import { defineConfig } from '@playwright/test';
           export default defineConfig({
@@ -94,25 +98,37 @@ pipeline {
           APP_URL="$APP_URL" PW_JUNIT_FILE="$PW_JUNIT_FILE" PW_HTML_DIR="$PW_HTML_DIR" \
             npx playwright test --config=jenkins.playwright.config.ts
 
-          # Sanity: prove index.html exists
+          # Prove where Playwright placed the report
+          echo "🔎 Searching for index.html under workspace..."
+          find "$PWD" -maxdepth 4 -path "*/playwright-report/index.html" -print || true
+
+          # Guard: HTML + JUnit must exist
           [ -f "$PW_HTML_DIR/index.html" ] || { echo "❌ Missing $PW_HTML_DIR/index.html"; exit 2; }
           [ -f "$PW_JUNIT_FILE" ]          || { echo "❌ Missing $PW_JUNIT_FILE"; exit 3; }
 
-          echo "🔎 Original report listing:"
-          ls -lah "$PW_HTML_DIR" | sed 's/^/  /'
-
-          # ---- Make a clean, symlink‑free, readable copy for the publisher ----
+          # Make a clean, symlink-free, readable copy for the publisher
           rm -rf "$PW_HTML_SAFE"
           mkdir -p "$PW_HTML_SAFE"
-          # -L follows symlinks, ensuring plain files get copied
-          cp -a -L "$PW_HTML_DIR"/. "$PW_HTML_SAFE"/
 
-          # Relax perms so Jenkins can traverse/copy
+          # Use rsync to follow symlinks and keep a plain tree
+          if command -v rsync >/dev/null 2>&1; then
+            rsync -a --copy-links "$PW_HTML_DIR"/ "$PW_HTML_SAFE"/
+          else
+            cp -a -L "$PW_HTML_DIR"/. "$PW_HTML_SAFE"/
+          fi
+
+          # Ensure Jenkins can traverse
           chmod -R a+rX "$PW_HTML_SAFE" "$PW_JUNIT_DIR" || true
 
-          echo "🔎 Safe report listing:"
-          ls -lah "$PW_HTML_SAFE" | sed 's/^/  /'
-          # --------------------------------------------------------------------
+          echo "✅ Final listings before publish:"
+          echo "  $(pwd)"
+          ls -lah .
+          echo "  playwright-report:"
+          ls -lah "$PW_HTML_DIR"
+          echo "  playwright-report-safe:"
+          ls -lah "$PW_HTML_SAFE"
+          echo "  test-results:"
+          ls -lah "$PW_JUNIT_DIR"
         '''
       }
       post {
@@ -120,10 +136,10 @@ pipeline {
           // JUnit tab + trends
           junit allowEmptyResults: true, testResults: 'test-results/results.xml'
 
-          // Keep both original + safe copies as artifacts
+          // Keep artifacts (both original + safe copies)
           archiveArtifacts artifacts: 'test-results/**,playwright-report/**,playwright-report-safe/**', onlyIfSuccessful: false
 
-          // ✅ Publish the SAFE copy so HTML Publisher never chokes
+          // Publish the SAFE copy so the plugin never chokes
           publishHTML([
             reportDir: 'playwright-report-safe',
             reportFiles: 'index.html',
