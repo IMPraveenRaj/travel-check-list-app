@@ -51,19 +51,22 @@ pipeline {
       agent {
         docker {
           image 'mcr.microsoft.com/playwright:v1.54.0-noble'
-          args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
+          // Run container as the same UID:GID as the Jenkins workspace owner,
+          // give Chromium enough shared memory, and allow reaching the host app.
+          args "--user=$(id -u):$(id -g) --add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm"
         }
       }
       steps {
         sh '''
           echo "🧪 Running Playwright UI tests..."
-          echo "Container PWD: $PWD"
+          echo "PWD (container-mounted workspace): $PWD"
 
-          # Use paths RELATIVE to the mounted workspace so @2 etc. never breaks us
+          # Use paths relative to current workspace (handles @2 etc.)
           PW_HTML_DIR="$PWD/playwright-report"
           PW_JUNIT_DIR="$PWD/test-results"
           PW_JUNIT_FILE="$PW_JUNIT_DIR/results.xml"
 
+          # npm cache inside workspace to avoid permission issues
           export NPM_CONFIG_CACHE="$PWD/.npm"
           mkdir -p "$NPM_CONFIG_CACHE" "$PW_JUNIT_DIR" "$PW_HTML_DIR"
 
@@ -73,7 +76,7 @@ pipeline {
             npm install --no-audit --no-fund
           fi
 
-          # CI Playwright config writing to the runtime-resolved paths
+          # CI Playwright config to force outputs to known locations
           cat > jenkins.playwright.config.ts <<'EOF'
           import { defineConfig } from '@playwright/test';
           export default defineConfig({
@@ -91,30 +94,28 @@ pipeline {
           });
           EOF
 
-          # Run tests
+          # Run tests (reports go to playwright-report/ and test-results/)
           APP_URL="$APP_URL" PW_JUNIT_FILE="$PW_JUNIT_FILE" PW_HTML_DIR="$PW_HTML_DIR" \
             npx playwright test --config=jenkins.playwright.config.ts
 
-          # Show where outputs landed
-          echo "🔎 test-results:"
-          ls -lah "$PW_JUNIT_DIR" || true
-          echo "🔎 playwright-report:"
-          ls -lah "$PW_HTML_DIR"  || true
+          # Sanity logs
+          echo "🔎 test-results:" && ls -lah "$PW_JUNIT_DIR" || true
+          echo "🔎 playwright-report:" && ls -lah "$PW_HTML_DIR" || true
 
-          # Guard: ensure files exist for publisher
+          # Guards so publisher won't fail mysteriously
           [ -f "$PW_JUNIT_FILE" ] || { echo "❌ Missing $PW_JUNIT_FILE"; exit 3; }
           [ -f "$PW_HTML_DIR/index.html" ] || { echo "❌ Missing $PW_HTML_DIR/index.html"; exit 2; }
         '''
       }
       post {
         always {
-          // JUnit test tab
+          // JUnit tab + trends
           junit allowEmptyResults: true, testResults: 'test-results/results.xml'
 
-          // Archive raw artifacts (HTML report, traces, screenshots)
+          // Keep raw artifacts (HTML report, traces, screenshots)
           archiveArtifacts artifacts: 'test-results/**,playwright-report/**', onlyIfSuccessful: false
 
-          // Publish HTML report inside Jenkins UI (relative to workspace)
+          // Publish Playwright HTML report inside Jenkins
           publishHTML([
             reportDir: 'playwright-report',
             reportFiles: 'index.html',
