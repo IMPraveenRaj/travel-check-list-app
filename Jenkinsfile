@@ -2,6 +2,7 @@ pipeline {
   agent any
 
   environment {
+    // App runs on the Jenkins node at 9090
     APP_URL = "http://host.docker.internal:9090"
   }
 
@@ -50,89 +51,48 @@ pipeline {
     stage('UI Automation Tests') {
       agent {
         docker {
-          image 'mcr.microsoft.com/playwright:v1.54.0-noble'
-          // No $(id -u) here! Just networking + larger /dev/shm.
+          image 'mcr.microsoft.com/playwright:v1.47.2-focal'
+          image 'mcr.microsoft.com/playwright:v1.54.2-focal'
+          // allow Playwright container to reach host app + give Chromium enough shm
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
       }
       steps {
         sh '''
           echo "🧪 Running Playwright UI tests..."
-          echo "Workspace (mounted in container) PWD: $PWD"
 
-          # Paths relative to workspace so job@2 etc. are handled
-          PW_HTML_DIR="$PWD/playwright-report"
-          PW_JUNIT_DIR="$PWD/test-results"
-          PW_JUNIT_FILE="$PW_JUNIT_DIR/results.xml"
-
+          # Safe npm cache path inside the container workspace
           export NPM_CONFIG_CACHE="$PWD/.npm"
-          mkdir -p "$NPM_CONFIG_CACHE" "$PW_JUNIT_DIR" "$PW_HTML_DIR"
+          mkdir -p "$NPM_CONFIG_CACHE"
 
           if [ -f package-lock.json ]; then
-            npm ci --no-audit --no-fund
+            npm ci
           else
-            npm install --no-audit --no-fund
+            npm install
           fi
 
-          # CI-specific Playwright config with controlled outputs
-          cat > jenkins.playwright.config.ts <<'EOF'
-          import { defineConfig } from '@playwright/test';
-          export default defineConfig({
-            use: {
-              baseURL: process.env.APP_URL || 'http://localhost:9090',
-              screenshot: 'only-on-failure',
-              trace: 'retain-on-failure',
-              video: 'retain-on-failure',
-            },
-            reporter: [
-              ['line'],
-              ['junit', { outputFile: process.env.PW_JUNIT_FILE }],
-              ['html',  { outputFolder: process.env.PW_HTML_DIR, open: 'never' }],
-            ],
-          });
-          EOF
+          # detect tests directory (test/ or tests/)
+          TEST_DIR="tests"
+          [ -d test ] && TEST_DIR="test"
 
-          # Run tests
-          APP_URL="$APP_URL" PW_JUNIT_FILE="$PW_JUNIT_FILE" PW_HTML_DIR="$PW_HTML_DIR" \
-            npx playwright test --config=jenkins.playwright.config.ts
+          mkdir -p test-results
 
-          # Ensure reports are readable by Jenkins on the host
-          HOST_UID=$(stat -c '%u' .) || HOST_UID=1000
-          HOST_GID=$(stat -c '%g' .) || HOST_GID=1000
-          echo "Fixing ownership to ${HOST_UID}:${HOST_GID}…"
-          chown -R "${HOST_UID}:${HOST_GID}" "$PW_HTML_DIR" "$PW_JUNIT_DIR" || true
+          # run tests with APP_URL passed
+          APP_URL="$APP_URL" npx playwright test \
+            --reporter=junit,line \
+            --output=test-results
 
-          echo "Relaxing permissions for publisher…"
-          find "$PW_HTML_DIR" -type d -exec chmod 755 {} + || true
-          find "$PW_HTML_DIR" -type f -exec chmod 644 {} + || true
-          find "$PW_JUNIT_DIR" -type d -exec chmod 755 {} + || true
-          find "$PW_JUNIT_DIR" -type f -exec chmod 644 {} + || true
+          # normalize junit file if Playwright drops it at root
+          [ -f results.xml ] && mv results.xml test-results/
 
-          # Sanity checks
-          [ -f "$PW_JUNIT_FILE" ] || { echo "❌ Missing $PW_JUNIT_FILE"; exit 3; }
-          [ -f "$PW_HTML_DIR/index.html" ] || { echo "❌ Missing $PW_HTML_DIR/index.html"; exit 2; }
-
-          echo "🔎 Contents of test-results:" && ls -lah "$PW_JUNIT_DIR"
-          echo "🔎 Contents of playwright-report:" && ls -lah "$PW_HTML_DIR"
+          # generate html report too
+          npx playwright show-report --output=test-results/html || true
         '''
       }
       post {
         always {
-          // JUnit tab in Jenkins
-          junit allowEmptyResults: true, testResults: 'test-results/results.xml'
-
-          // Archive raw artifacts (HTML report, traces, screenshots)
-          archiveArtifacts artifacts: 'test-results/**,playwright-report/**', onlyIfSuccessful: false
-
-          // Publish Playwright HTML report link in Jenkins UI
-          publishHTML([
-            reportDir: 'playwright-report',
-            reportFiles: 'index.html',
-            reportName: 'Playwright Report',
-            keepAll: true,
-            alwaysLinkToLastBuild: true,
-            allowMissing: false
-          ])
+          junit allowEmptyResults: true, testResults: 'test-results/**/*.xml'
+          archiveArtifacts artifacts: 'test-results/**', onlyIfSuccessful: false
         }
       }
     }
