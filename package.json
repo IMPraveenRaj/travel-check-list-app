@@ -2,6 +2,15 @@
   "name": "travel-list",
   "version": "0.1.0",
   "private": true,
+  "description": "A simple React-based Travel Checklist app. Containerized with Docker and deployed to an Azure VM via Jenkins.",
+  "main": "index.js",
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "test:ui": "APP_URL=${APP_URL:-http://localhost:9090} npx playwright test --output=test-results --reporter=junit,line"
+  },
   "dependencies": {
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
@@ -11,46 +20,26 @@
     "react-scripts": "5.0.1",
     "web-vitals": "^2.1.4"
   },
-  "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "ts-node": "^10.9.2",
+    "typescript": "4.9.5"
   },
   "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
+    "extends": ["react-app", "react-app/jest"]
   },
   "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
   },
-  "description": "A simple **React-based Todo / Travel Checklist application**.   The app is containerized with **Docker** (served using Nginx) and deployed on an **Azure VM** via a **Jenkins Pipeline**.",
-  "main": "travel-checklist.spec.js",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/IMPraveenRaj/travel-check-list-app.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "bugs": {
     "url": "https://github.com/IMPraveenRaj/travel-check-list-app/issues"
   },
   "homepage": "https://github.com/IMPraveenRaj/travel-check-list-app#readme",
-  "devDependencies": {
-    "@playwright/test": "^1.54.2",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.2"
-  }
+  "license": "ISC",
+  "keywords": []
 }
