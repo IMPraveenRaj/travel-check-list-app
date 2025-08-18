@@ -51,7 +51,7 @@ pipeline {
     stage('UI Automation Tests') {
       agent {
         docker {
-          image 'mcr.microsoft.com/playwright:v1.47.2-focal'
+          image 'mcr.microsoft.com/playwright:v1.54.2-focal'
           // allow Playwright container to reach host app + give Chromium enough shm
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
