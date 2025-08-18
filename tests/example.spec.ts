@@ -28,5 +28,5 @@ test('Add items&check', async ({page}) => {
   await page.getByRole('button', { name: 'Add' }).click();
   await page.getByPlaceholder("Items...").fill("Dresses");
   await page.getByRole('button', { name: 'Add' }).click();
-await page.waitForTimeout(5000);
+await page.waitForTimeout(6000);
 })
