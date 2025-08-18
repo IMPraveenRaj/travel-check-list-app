@@ -55,7 +55,7 @@ pipeline {
       }
       steps {
         sh '''
-          echo "🧪 Running Playwright UI tests..."
+          echo "🧪 Running Playwright UI tests...."
           export NPM_CONFIG_CACHE="$PWD/.npm"
           mkdir -p "$NPM_CONFIG_CACHE"
 
