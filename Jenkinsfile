@@ -2,10 +2,12 @@ pipeline {
   agent any
 
   environment {
+    // Your app runs on the Jenkins node at 9090
     APP_URL = "http://host.docker.internal:9090"
   }
 
   stages {
+
     stage('Pull Image') {
       steps {
         sh '''
@@ -49,13 +51,17 @@ pipeline {
     stage('UI Automation Tests') {
       agent {
         docker {
+          // Valid Playwright image tag
           image 'mcr.microsoft.com/playwright:v1.54.0-noble'
+          // Let container reach host app + enough shared memory for Chromium
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
       }
       steps {
         sh '''
-          echo "🧪 Running Playwright UI tests...."
+          echo "🧪 Running Playwright UI tests..."
+
+          # Safe npm cache path inside the container workspace
           export NPM_CONFIG_CACHE="$PWD/.npm"
           mkdir -p "$NPM_CONFIG_CACHE"
 
@@ -65,22 +71,37 @@ pipeline {
             npm install --no-audit --no-fund
           fi
 
-          # Playwright config writes:
-          # - JUnit -> test-results/results.xml
-          # - HTML  -> playwright-report/
+          # Write a Playwright config specifically for CI so reports go to known paths
+          cat > jenkins.playwright.config.ts <<'EOF'
+          import { defineConfig } from '@playwright/test';
+          export default defineConfig({
+            use: {
+              baseURL: process.env.APP_URL || 'http://localhost:9090',
+            },
+            reporter: [
+              ['line'],
+              ['junit', { outputFile: 'test-results/results.xml' }],
+              ['html',  { outputFolder: 'playwright-report', open: 'never' }],
+            ],
+          });
+          EOF
+
+          # Ensure results folders exist
           mkdir -p test-results
-          APP_URL="$APP_URL" npx playwright test
+
+          # Run tests with the CI config
+          APP_URL="$APP_URL" npx playwright test --config=jenkins.playwright.config.ts
         '''
       }
       post {
         always {
-          // JUnit test view + trends
+          // JUnit test results (enables "Test Result" & trend)
           junit allowEmptyResults: true, testResults: 'test-results/results.xml'
 
           // Keep raw artifacts too
           archiveArtifacts artifacts: 'test-results/**,playwright-report/**', onlyIfSuccessful: false
 
-          // 🔗 Publish Playwright HTML report inside Jenkins UI
+          // Publish Playwright HTML report inside Jenkins UI
           publishHTML([
             reportDir: 'playwright-report',
             reportFiles: 'index.html',
