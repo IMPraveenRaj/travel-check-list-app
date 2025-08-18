@@ -1,45 +1,106 @@
-stage('UI Automation Tests') {
-  agent {
-    docker {
-      image 'mcr.microsoft.com/playwright:v1.47.2-focal'
-      args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
-    }
-  }
+pipeline {
+  agent any
+
   environment {
+    // App runs on the Jenkins node at 9090
     APP_URL = "http://host.docker.internal:9090"
   }
-  steps {
-    sh '''
-      echo "🧪 Running Playwright UI tests..."
 
-      # Use a cache directory inside the container workspace
-      export NPM_CONFIG_CACHE="$PWD/.npm"
-      mkdir -p "$NPM_CONFIG_CACHE"
+  stages {
 
-      if [ -f package-lock.json ]; then
-        npm ci
-      else
-        npm install
-      fi
+    stage('Pull Image') {
+      steps {
+        sh '''
+          echo "📥 Pulling latest image..."
+          docker pull impraveenraj/travel-check-list:latest
+        '''
+      }
+    }
 
-      TEST_DIR="tests"; [ -d test ] && TEST_DIR="test"
-      mkdir -p test-results
+    stage('Run Container') {
+      steps {
+        sh '''
+          echo "🚀 Starting container..."
+          docker stop travel-check-list || true
+          docker rm travel-check-list || true
+          docker run -d --name travel-check-list -p 9090:80 \
+            --restart unless-stopped \
+            impraveenraj/travel-check-list:latest
+        '''
+      }
+    }
 
-      APP_URL="$APP_URL" npx playwright test \
-        --reporter=junit,line \
-        --output=test-results
+    stage('Smoke Check') {
+      steps {
+        sh '''
+          echo "🔍 Checking if app is running..."
+          for i in {1..12}; do
+            if curl -sSf -o /dev/null http://localhost:9090; then
+              echo "✅ App is up!"
+              exit 0
+            fi
+            echo "…waiting ($i)"
+            sleep 5
+          done
+          echo "❌ App did not become ready on :9090"
+          exit 1
+        '''
+      }
+    }
 
-      # Normalize junit output location if needed
-      [ -f results.xml ] && mv results.xml test-results/
+    stage('UI Automation Tests') {
+      agent {
+        docker {
+          image 'mcr.microsoft.com/playwright:v1.47.2-focal'
+          // allow Playwright container to reach host app + give Chromium enough shm
+          args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
+        }
+      }
+      steps {
+        sh '''
+          echo "🧪 Running Playwright UI tests..."
 
-      # Generate HTML report (optional)
-      npx playwright show-report --output=test-results/html || true
-    '''
+          # Safe npm cache path inside the container workspace
+          export NPM_CONFIG_CACHE="$PWD/.npm"
+          mkdir -p "$NPM_CONFIG_CACHE"
+
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+          # detect tests directory (test/ or tests/)
+          TEST_DIR="tests"
+          [ -d test ] && TEST_DIR="test"
+
+          mkdir -p test-results
+
+          # run tests with APP_URL passed
+          APP_URL="$APP_URL" npx playwright test \
+            --reporter=junit,line \
+            --output=test-results
+
+          # normalize junit file if Playwright drops it at root
+          [ -f results.xml ] && mv results.xml test-results/
+
+          # generate html report too
+          npx playwright show-report --output=test-results/html || true
+        '''
+      }
+      post {
+        always {
+          junit allowEmptyResults: true, testResults: 'test-results/**/*.xml'
+          archiveArtifacts artifacts: 'test-results/**', onlyIfSuccessful: false
+        }
+      }
+    }
   }
+
   post {
     always {
-      junit allowEmptyResults: true, testResults: 'test-results/**/*.xml'
-      archiveArtifacts artifacts: 'test-results/**', onlyIfSuccessful: false
+      echo "🧹 Cleaning workspace..."
+      cleanWs()
     }
   }
 }
