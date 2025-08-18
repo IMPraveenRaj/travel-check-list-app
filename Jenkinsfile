@@ -51,16 +51,15 @@ pipeline {
       agent {
         docker {
           image 'mcr.microsoft.com/playwright:v1.54.0-noble'
-          // No $(id -u) here! Just networking + larger /dev/shm.
+          // reach host app + larger /dev/shm for Chromium
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
       }
       steps {
         sh '''
           echo "🧪 Running Playwright UI tests..."
-          echo "Workspace (mounted in container) PWD: $PWD"
+          echo "Workspace in container (PWD) = $PWD"
 
-          # Paths relative to workspace so job@2 etc. are handled
           PW_HTML_DIR="$PWD/playwright-report"
           PW_JUNIT_DIR="$PWD/test-results"
           PW_JUNIT_FILE="$PW_JUNIT_DIR/results.xml"
@@ -74,7 +73,7 @@ pipeline {
             npm install --no-audit --no-fund
           fi
 
-          # CI-specific Playwright config with controlled outputs
+          # CI Playwright config -> forces outputs to mounted workspace
           cat > jenkins.playwright.config.ts <<'EOF'
           import { defineConfig } from '@playwright/test';
           export default defineConfig({
@@ -96,19 +95,18 @@ pipeline {
           APP_URL="$APP_URL" PW_JUNIT_FILE="$PW_JUNIT_FILE" PW_HTML_DIR="$PW_HTML_DIR" \
             npx playwright test --config=jenkins.playwright.config.ts
 
-          # Ensure reports are readable by Jenkins on the host
-          HOST_UID=$(stat -c '%u' .) || HOST_UID=1000
-          HOST_GID=$(stat -c '%g' .) || HOST_GID=1000
+          # --- Make sure Jenkins (on the host) can copy the report ---
+          # Use the host UID/GID seen through the mount (same as Jenkins user)
+          HOST_UID=$(stat -c '%u' . || id -u)
+          HOST_GID=$(stat -c '%g' . || id -g)
           echo "Fixing ownership to ${HOST_UID}:${HOST_GID}…"
           chown -R "${HOST_UID}:${HOST_GID}" "$PW_HTML_DIR" "$PW_JUNIT_DIR" || true
 
-          echo "Relaxing permissions for publisher…"
-          find "$PW_HTML_DIR" -type d -exec chmod 755 {} + || true
-          find "$PW_HTML_DIR" -type f -exec chmod 644 {} + || true
-          find "$PW_JUNIT_DIR" -type d -exec chmod 755 {} + || true
-          find "$PW_JUNIT_DIR" -type f -exec chmod 644 {} + || true
+          echo "Relaxing permissions…"
+          chmod -R a+rX "$PW_HTML_DIR" "$PW_JUNIT_DIR" || true
+          # -----------------------------------------------------------
 
-          # Sanity checks
+          # Guards so publisher won't fail mysteriously
           [ -f "$PW_JUNIT_FILE" ] || { echo "❌ Missing $PW_JUNIT_FILE"; exit 3; }
           [ -f "$PW_HTML_DIR/index.html" ] || { echo "❌ Missing $PW_HTML_DIR/index.html"; exit 2; }
 
@@ -118,13 +116,13 @@ pipeline {
       }
       post {
         always {
-          // JUnit tab in Jenkins
+          // JUnit tab + trends
           junit allowEmptyResults: true, testResults: 'test-results/results.xml'
 
-          // Archive raw artifacts (HTML report, traces, screenshots)
+          // Keep artifacts (HTML report, traces, screenshots)
           archiveArtifacts artifacts: 'test-results/**,playwright-report/**', onlyIfSuccessful: false
 
-          // Publish Playwright HTML report link in Jenkins UI
+          // Publish Playwright HTML report inside Jenkins
           publishHTML([
             reportDir: 'playwright-report',
             reportFiles: 'index.html',
