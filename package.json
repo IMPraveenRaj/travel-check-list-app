@@ -34,5 +34,23 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "description": "A simple **React-based Todo / Travel Checklist application**.   The app is containerized with **Docker** (served using Nginx) and deployed on an **Azure VM** via a **Jenkins Pipeline**.",
+  "main": "travel-checklist.spec.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IMPraveenRaj/travel-check-list-app.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/IMPraveenRaj/travel-check-list-app/issues"
+  },
+  "homepage": "https://github.com/IMPraveenRaj/travel-check-list-app#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
   }
 }
