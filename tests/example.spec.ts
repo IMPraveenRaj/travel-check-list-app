@@ -21,7 +21,7 @@ test.only('add items', async({page}) => {
 await page.waitForTimeout(5000);
 })
 
-test('Add items&check', async ({page}) => {
+test('Add multiple items', async ({page}) => {
   await page.goto("http://40.76.118.177:9090/");
   await page.getByText("🌴Far Away💼").isVisible();
   await page.getByPlaceholder("Items...").fill("Backpack");
