@@ -2,8 +2,11 @@ pipeline {
   agent any
 
   environment {
-    // Your app runs on the Jenkins node at 9090
     APP_URL = "http://host.docker.internal:9090"
+    // Absolute paths in the Jenkins host workspace
+    PW_HTML_DIR = "${WORKSPACE}/playwright-report"
+    PW_JUNIT_FILE = "${WORKSPACE}/test-results/results.xml"
+    PW_JUNIT_DIR  = "${WORKSPACE}/test-results"
   }
 
   stages {
@@ -51,19 +54,21 @@ pipeline {
     stage('UI Automation Tests') {
       agent {
         docker {
-          // Valid Playwright image tag
           image 'mcr.microsoft.com/playwright:v1.54.0-noble'
-          // Let container reach host app + enough shared memory for Chromium
+          // Mounts the workspace; allow container to reach host + bigger /dev/shm
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
       }
       steps {
         sh '''
           echo "🧪 Running Playwright UI tests..."
+          echo "Workspace (host): $WORKSPACE"
+          echo "HTML report dir : $PW_HTML_DIR"
+          echo "JUnit file      : $PW_JUNIT_FILE"
 
           # Safe npm cache path inside the container workspace
           export NPM_CONFIG_CACHE="$PWD/.npm"
-          mkdir -p "$NPM_CONFIG_CACHE"
+          mkdir -p "$NPM_CONFIG_CACHE" "$PW_JUNIT_DIR" "$PW_HTML_DIR"
 
           if [ -f package-lock.json ]; then
             npm ci --no-audit --no-fund
@@ -71,44 +76,54 @@ pipeline {
             npm install --no-audit --no-fund
           fi
 
-          # Write a Playwright config specifically for CI so reports go to known paths
+          # Create a CI-specific Playwright config that uses ABSOLUTE paths
           cat > jenkins.playwright.config.ts <<'EOF'
           import { defineConfig } from '@playwright/test';
           export default defineConfig({
             use: {
               baseURL: process.env.APP_URL || 'http://localhost:9090',
+              screenshot: 'only-on-failure',
+              trace: 'retain-on-failure',
+              video: 'retain-on-failure',
             },
             reporter: [
               ['line'],
-              ['junit', { outputFile: 'test-results/results.xml' }],
-              ['html',  { outputFolder: 'playwright-report', open: 'never' }],
+              ['junit', { outputFile: process.env.PW_JUNIT_FILE }],
+              ['html',  { outputFolder: process.env.PW_HTML_DIR, open: 'never' }],
             ],
           });
           EOF
 
-          # Ensure results folders exist
-          mkdir -p test-results
+          # Run tests (outputs go to absolute host-mounted paths)
+          APP_URL="$APP_URL" PW_JUNIT_FILE="$PW_JUNIT_FILE" PW_HTML_DIR="$PW_HTML_DIR" \
+            npx playwright test --config=jenkins.playwright.config.ts
 
-          # Run tests with the CI config
-          APP_URL="$APP_URL" npx playwright test --config=jenkins.playwright.config.ts
+          # Debug: show where things landed (host paths)
+          echo "🔎 Listing test-results and playwright-report..."
+          ls -lah "$PW_JUNIT_DIR" || true
+          ls -lah "$PW_HTML_DIR"  || true
+
+          # Guard so publishHTML won't fail silently
+          [ -f "$PW_HTML_DIR/index.html" ] || { echo "❌ Missing $PW_HTML_DIR/index.html"; exit 2; }
+          [ -f "$PW_JUNIT_FILE" ]          || { echo "❌ Missing $PW_JUNIT_FILE"; exit 3; }
         '''
       }
       post {
         always {
-          // JUnit test results (enables "Test Result" & trend)
+          // JUnit test tab in Jenkins
           junit allowEmptyResults: true, testResults: 'test-results/results.xml'
 
-          // Keep raw artifacts too
+          // Keep raw artifacts (HTML report, traces, screenshots)
           archiveArtifacts artifacts: 'test-results/**,playwright-report/**', onlyIfSuccessful: false
 
-          // Publish Playwright HTML report inside Jenkins UI
+          // Publish HTML report inside Jenkins UI (uses absolute dir in workspace)
           publishHTML([
             reportDir: 'playwright-report',
             reportFiles: 'index.html',
             reportName: 'Playwright Report',
             keepAll: true,
             alwaysLinkToLastBuild: true,
-            allowMissing: true
+            allowMissing: false
           ])
         }
       }
