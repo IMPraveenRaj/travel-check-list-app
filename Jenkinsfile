@@ -2,12 +2,10 @@ pipeline {
   agent any
 
   environment {
-    // App runs on the Jenkins node at 9090
     APP_URL = "http://host.docker.internal:9090"
   }
 
   stages {
-
     stage('Pull Image') {
       steps {
         sh '''
@@ -51,8 +49,9 @@ pipeline {
     stage('UI Automation Tests') {
       agent {
         docker {
-          image 'mcr.microsoft.com/playwright:v1.54.2-focal'
-          // allow Playwright container to reach host app + give Chromium enough shm
+          // ✅ valid Playwright image tag
+          image 'mcr.microsoft.com/playwright:v1.54.0-noble'
+          // reach host app + larger /dev/shm
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
       }
@@ -65,33 +64,29 @@ pipeline {
           mkdir -p "$NPM_CONFIG_CACHE"
 
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci --no-audit --no-fund
           else
-            npm install
+            npm install --no-audit --no-fund
           fi
 
           # detect tests directory (test/ or tests/)
-          TEST_DIR="tests"
-          [ -d test ] && TEST_DIR="test"
+          TEST_DIR="tests"; [ -d test ] && TEST_DIR="test"
 
           mkdir -p test-results
 
-          # run tests with APP_URL passed
+          # Run with JUnit + HTML reporters; HTML goes to playwright-report/
           APP_URL="$APP_URL" npx playwright test \
-            --reporter=junit,line \
+            --reporter=junit,html \
             --output=test-results
 
-          # normalize junit file if Playwright drops it at root
+          # Normalize JUnit file if Playwright placed it at root
           [ -f results.xml ] && mv results.xml test-results/
-
-          # generate html report too
-          npx playwright show-report --output=test-results/html || true
         '''
       }
       post {
         always {
           junit allowEmptyResults: true, testResults: 'test-results/**/*.xml'
-          archiveArtifacts artifacts: 'test-results/**', onlyIfSuccessful: false
+          archiveArtifacts artifacts: 'test-results/**, playwright-report/**', onlyIfSuccessful: false
         }
       }
     }
