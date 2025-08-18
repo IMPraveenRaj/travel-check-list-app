@@ -51,14 +51,13 @@ pipeline {
       agent {
         docker {
           image 'mcr.microsoft.com/playwright:v1.54.0-noble'
-          // reach host app + larger /dev/shm for Chromium
           args '--add-host=host.docker.internal:host-gateway -v /dev/shm:/dev/shm'
         }
       }
       steps {
         sh '''
           echo "🧪 Running Playwright UI tests..."
-          echo "Workspace in container (PWD) = $PWD"
+          echo "Workspace (mounted in container) PWD: $PWD"
 
           PW_HTML_DIR="$PWD/playwright-report"
           PW_JUNIT_DIR="$PWD/test-results"
@@ -73,7 +72,7 @@ pipeline {
             npm install --no-audit --no-fund
           fi
 
-          # CI Playwright config -> forces outputs to mounted workspace
+          # CI-specific Playwright config – controlled outputs
           cat > jenkins.playwright.config.ts <<'EOF'
           import { defineConfig } from '@playwright/test';
           export default defineConfig({
@@ -95,8 +94,7 @@ pipeline {
           APP_URL="$APP_URL" PW_JUNIT_FILE="$PW_JUNIT_FILE" PW_HTML_DIR="$PW_HTML_DIR" \
             npx playwright test --config=jenkins.playwright.config.ts
 
-          # --- Make sure Jenkins (on the host) can copy the report ---
-          # Use the host UID/GID seen through the mount (same as Jenkins user)
+          # Normalize ownership/permissions so Jenkins can copy
           HOST_UID=$(stat -c '%u' . || id -u)
           HOST_GID=$(stat -c '%g' . || id -g)
           echo "Fixing ownership to ${HOST_UID}:${HOST_GID}…"
@@ -104,9 +102,8 @@ pipeline {
 
           echo "Relaxing permissions…"
           chmod -R a+rX "$PW_HTML_DIR" "$PW_JUNIT_DIR" || true
-          # -----------------------------------------------------------
 
-          # Guards so publisher won't fail mysteriously
+          # Guards (fail with clear message if missing)
           [ -f "$PW_JUNIT_FILE" ] || { echo "❌ Missing $PW_JUNIT_FILE"; exit 3; }
           [ -f "$PW_HTML_DIR/index.html" ] || { echo "❌ Missing $PW_HTML_DIR/index.html"; exit 2; }
 
@@ -116,10 +113,20 @@ pipeline {
       }
       post {
         always {
+          // ✅ Pre-clean the per-build publish target (handles root-owned leftovers)
+          sh '''
+            # Only if JENKINS_HOME is available (it usually is on agents)
+            if [ -n "$JENKINS_HOME" ] && [ -n "$JOB_NAME" ] && [ -n "$BUILD_NUMBER" ]; then
+              TARGET_DIR="$JENKINS_HOME/jobs/$JOB_NAME/builds/$BUILD_NUMBER/htmlreports/Playwright_20Report"
+              echo "Cleaning publish target: $TARGET_DIR"
+              rm -rf "$TARGET_DIR" || true
+            fi
+          '''
+
           // JUnit tab + trends
           junit allowEmptyResults: true, testResults: 'test-results/results.xml'
 
-          // Keep artifacts (HTML report, traces, screenshots)
+          // Keep artifacts for direct download
           archiveArtifacts artifacts: 'test-results/**,playwright-report/**', onlyIfSuccessful: false
 
           // Publish Playwright HTML report inside Jenkins
