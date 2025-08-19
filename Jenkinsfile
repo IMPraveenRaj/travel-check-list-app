@@ -9,7 +9,7 @@ pipeline {
     stage('Pull Image') {
       steps {
         sh '''
-          echo "📥 Pulling latest image..."
+          echo "📥 Pulling latest image...."
           docker pull impraveenraj/travel-check-list:latest
         '''
       }
