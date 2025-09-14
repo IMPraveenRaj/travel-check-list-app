@@ -2,30 +2,33 @@ pipeline {
   agent any
 
   environment {
-    APP_URL = "http://40.76.118.177:9090"
+    APP_URL = "http://40.76.118.177:9090"   // your app endpoint
   }
 
   stages {
-    stage('Install') {
+    stage('Install dependencies') {
       steps {
         sh '''
+          echo "📦 Installing npm deps..."
           npm ci || npm install
-          npx playwright install --with-deps
+          echo "🌐 Installing Playwright browsers..."
+          npx playwright install chromium
         '''
       }
     }
 
-    stage('Run Playwright Tests') {
+    stage('Run Playwright tests') {
       steps {
         sh '''
-          echo "Running Playwright tests against $APP_URL ..."
+          echo "🧪 Running Playwright tests against $APP_URL ..."
           APP_URL="$APP_URL" npx playwright test --reporter=html
+          echo "📂 Listing report files:"
           ls -la playwright-report || true
         '''
       }
     }
 
-    stage('Publish Report') {
+    stage('Publish HTML report') {
       steps {
         publishHTML(target: [
           reportDir: 'playwright-report',
