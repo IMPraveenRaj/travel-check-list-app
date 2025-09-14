@@ -1,6 +1,10 @@
 pipeline {
   agent any
 
+  environment {
+    APP_URL = "http://40.76.118.177:9090"
+  }
+
   stages {
     stage('Install') {
       steps {
@@ -11,10 +15,13 @@ pipeline {
       }
     }
 
-    stage('Test') {
+    stage('Run Playwright Tests') {
       steps {
-        sh 'npx playwright test --reporter=html'
-        sh 'ls -la && ls -la playwright-report || true'
+        sh '''
+          echo "Running Playwright tests against $APP_URL ..."
+          APP_URL="$APP_URL" npx playwright test --reporter=html
+          ls -la playwright-report || true
+        '''
       }
     }
 
