@@ -2,10 +2,17 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  timeout: 30000,
+  timeout: 30_000,
   expect: {
-    timeout: 5000
+    timeout: 5_000,
   },
+
+  use: {
+    // 👇 Use the APP_URL from Jenkins, fallback to localhost if run locally
+    baseURL: process.env.APP_URL || 'http://localhost:9090',
+    headless: true,
+  },
+
   projects: [
     {
       name: 'chromium',
@@ -19,5 +26,10 @@ export default defineConfig({
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
     },
+  ],
+
+  reporter: [
+    ['list'],
+    ['html', { open: 'never' }],
   ],
 });
